@@ -6,14 +6,14 @@ import bodyParser from 'body-parser';
 import qrcode from 'qrcode';
 import cloudinary from 'cloudinary';
 
-// Konfigurasi Cloudinary
+// Konfigurasi Cloudinary (tetap sama)
 cloudinary.config({
   cloud_name: 'dizjo8vzg',
   api_key: '373539693517747',
   api_secret: 'HcUwhQbFHK9j4PJ0fypeT-LIaj8',
 });
 
-// Inisialisasi WhatsApp client
+// Inisialisasi WhatsApp client (tetap sama)
 const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
@@ -22,7 +22,7 @@ const client = new Client({
   },
 });
 
-// Tampilkan QR Code saat login dibutuhkan
+// QR Code handler (tetap sama)
 client.on('qr', async (qr) => {
   console.log('📸 Silakan scan QR Code ini untuk login:');
   try {
@@ -38,20 +38,12 @@ client.on('qr', async (qr) => {
   }
 });
 
-// WA Bot siap digunakan
-client.on('ready', () => {
-  console.log('✅ Bot siap digunakan!');
-});
+// Event handlers (tetap sama)
+client.on('ready', () => console.log('✅ Bot siap digunakan!'));
+client.on('disconnected', (reason) => console.log('❌ Terputus:', reason));
+client.on('auth_failure', (msg) => console.error('❌ Autentikasi gagal:', msg));
 
-// Error koneksi atau autentikasi
-client.on('disconnected', (reason) =>
-  console.log('❌ Terputus:', reason)
-);
-client.on('auth_failure', (msg) =>
-  console.error('❌ Autentikasi gagal:', msg)
-);
-
-// Pesan masuk
+// Pesan masuk handler (tetap sama)
 client.on('message', async (message) => {
   if (message.fromMe) return;
 
@@ -80,45 +72,76 @@ client.on('message', async (message) => {
     }
 
     const data = await webhookResponse.json();
-
     if (data.reply) {
       await message.reply(data.reply);
       console.log('✅ Balasan berhasil dikirim.');
-    } else {
-      console.log('ℹ️ Webhook tidak memberikan balasan.');
     }
   } catch (error) {
     console.error('❌ Gagal memproses pesan:', error);
   }
 });
 
-// Jalankan WhatsApp client
+// Inisialisasi client (tetap sama)
 client.initialize();
 
-// Setup Express untuk endpoint webhook manual
+// Perbaikan hanya pada bagian ini ▼ (Express endpoint)
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(bodyParser.json());
+app.use(bodyParser.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf.toString();
+  }
+}));
 
 app.post('/reply', async (req, res) => {
-  const { from, reply } = req.body;
-
-  if (!from || !reply) {
-    return res.status(400).json({ error: 'Parameter from atau reply kosong.' });
-  }
-
   try {
+    // Handle both raw JSON string and parsed JSON
+    const payload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    
+    const { from, reply } = payload;
+    
+    if (!from || !reply) {
+      console.error('❌ Parameter kurang:', { from, reply });
+      return res.status(400).json({
+        error: 'Parameter from dan reply diperlukan',
+        contoh_format: {
+          from: "628xxxx@c.us",
+          reply: "Pesan balasan"
+        },
+        received: payload
+      });
+    }
+
+    // Validasi format nomor WhatsApp
+    if (!from.endsWith('@c.us')) {
+      return res.status(400).json({ 
+        error: 'Format nomor harus [kode negara][nomor]@c.us',
+        contoh: "6281234567890@c.us" 
+      });
+    }
+
     await client.sendMessage(from, reply);
-    console.log('✅ Balasan dikirim:', reply);
-    res.status(200).json({ status: 'success' });
+    console.log('📤 Mengirim balasan ke', from);
+    return res.json({ success: true });
+    
   } catch (err) {
-    console.error('❌ Gagal mengirim balasan dari endpoint:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('❌ Error processing /reply:', {
+      rawBody: req.rawBody,
+      error: err.message
+    });
+    return res.status(400).json({ 
+      error: 'Format request tidak valid',
+      detail: err.message,
+      contoh_valid: {
+        from: "6281234567890@c.us",
+        reply: "Halo! Ini balasan"
+      }
+    });
   }
 });
 
-// Jalankan server listener
+// Server listener (tetap sama)
 app.listen(PORT, () => {
   console.log(`🚀 Webhook listener aktif di http://localhost:${PORT}/reply`);
 });
