@@ -44,4 +44,94 @@ client.on('qr', async (qr) => {
 
 // Event saat bot siap
 client.on('ready', () => {
-  console.log('
+  console.log('✅ Bot WhatsApp siap digunakan!');
+});
+
+// Event error
+client.on('auth_failure', msg => {
+  console.error('❌ Autentikasi gagal:', msg);
+});
+
+client.on('disconnected', reason => {
+  console.error('❌ Bot terputus:', reason);
+});
+
+// Pesan masuk
+client.on('message', async (message) => {
+  if (message.fromMe) return;
+
+  const userId = message.from;
+  const userMessage = message.body;
+
+  console.log('📥 Pesan dari', userId, ':', userMessage);
+
+  try {
+    const webhookResponse = await fetch('https://hook.eu2.make.com/5u1hm76pfynq7ix19mkb4j6dauj4aiew', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: userMessage, from: userId }),
+    });
+
+    const contentType = webhookResponse.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const text = await webhookResponse.text();
+      console.warn('⚠️ Webhook tidak mengembalikan JSON. Respons:', text);
+      return;
+    }
+
+    const data = await webhookResponse.json();
+    if (data.reply) {
+      await message.reply(data.reply);
+      console.log('✅ Balasan berhasil dikirim.');
+    } else {
+      console.log('ℹ️ Tidak ada balasan dari webhook.');
+    }
+  } catch (error) {
+    console.error('❌ Gagal memproses pesan:', error);
+  }
+});
+
+// Endpoint test untuk Railway
+app.get('/', (req, res) => {
+  res.send('WhatsApp bot aktif.');
+});
+
+// Endpoint kirim pesan manual
+app.use(bodyParser.json());
+app.post('/reply', async (req, res) => {
+  try {
+    let payload = req.body;
+    if (req.body.data) {
+      payload = typeof req.body.data === 'string'
+        ? JSON.parse(req.body.data)
+        : req.body.data;
+    }
+
+    const { from, reply } = payload;
+    if (!from || !reply) {
+      return res.status(400).json({
+        error: 'Parameter from atau reply kosong',
+        contoh_format: {
+          from: '628xxxx@c.us',
+          reply: 'Pesan balasan',
+        },
+      });
+    }
+
+    await client.sendMessage(from, reply);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error di /reply:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Inisialisasi bot
+client.initialize()
+  .then(() => console.log('✅ client.initialize() sukses'))
+  .catch(err => console.error('❌ Gagal initialize WhatsApp client:', err));
+
+// Jalankan server Express
+app.listen(PORT, () => {
+  console.log(`🚀 Server Express aktif di port ${PORT}`);
+});
