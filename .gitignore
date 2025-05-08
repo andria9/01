@@ -1,8 +1,6 @@
 .env
 node_modules
 firebase-access-token-generator/
-.wwebjs_cache/
-.wwebjs_auth/
 firebase.js
 firebase-key.json
 generateAccessToken.js
