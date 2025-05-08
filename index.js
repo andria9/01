@@ -5,6 +5,7 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import qrcode from 'qrcode';
 import cloudinary from 'cloudinary';
+import puppeteer from 'puppeteer'; // Tambahkan ini
 
 // Konfigurasi Cloudinary
 cloudinary.config({
@@ -13,12 +14,26 @@ cloudinary.config({
   api_secret: 'HcUwhQbFHK9j4PJ0fypeT-LIaj8',
 });
 
+// Dapatkan executable path Chrome dari puppeteer
+const executablePath = (await puppeteer.launch()).executablePath();
+console.log('📍 Chrome path:', executablePath);
+
 // Inisialisasi WhatsApp client
 const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
+    executablePath, // Tambahan untuk Railway
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-first-run',
+      '--no-zygote',
+      '--single-process',
+      '--disable-gpu',
+    ],
   },
 });
 
@@ -57,7 +72,6 @@ client.on('message', async (message) => {
   console.log('📥 Pesan dari', userId, ':', userMessage);
 
   try {
-    // Kirim pesan ke webhook Make
     const webhookResponse = await fetch('https://hook.eu2.make.com/5u1hm76pfynq7ix19mkb4j6dauj4aiew', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
