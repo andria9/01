@@ -66,7 +66,7 @@ client.on('message', async (message) => {
   console.log('📥 Pesan dari', userId, ':', userMessage);
 
   try {
-    const webhookResponse = await fetch('https://hook.eu2.make.com/30cdsc6rdr70x97lfg86d50hgno5twzp', {
+    const webhookResponse = await fetch('https://hook.eu2.make.com/y5p75xdmob4kt8dbf0apeekr3mg8gg5r', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: userMessage, from: userId }),
