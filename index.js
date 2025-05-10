@@ -100,11 +100,15 @@ app.get('/', (req, res) => {
 app.use(bodyParser.json());
 app.post('/reply', async (req, res) => {
   try {
-    let payload = req.body;
-    if (req.body.data) {
-      payload = typeof req.body.data === 'string'
-        ? JSON.parse(req.body.data)
-        : req.body.data;
+    let payload;
+
+    // Parsing fleksibel dan aman terhadap berbagai format
+    if (typeof req.body === 'string') {
+      payload = JSON.parse(req.body);
+    } else if (typeof req.body.data === 'string') {
+      payload = JSON.parse(req.body.data);
+    } else {
+      payload = req.body.data || req.body;
     }
 
     const { from, reply } = payload;
@@ -122,7 +126,11 @@ app.post('/reply', async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     console.error('Error di /reply:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({
+      error: 'Gagal memproses permintaan.',
+      detail: err.message,
+      raw: req.body,
+    });
   }
 });
 
