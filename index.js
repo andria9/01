@@ -125,7 +125,7 @@ app.post('/reply', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
+res.header('Access-Control-Allow-Origin', '*'); //tambahan
 // Inisialisasi bot
 client.initialize()
   .then(() => console.log('✅ client.initialize() sukses'))
