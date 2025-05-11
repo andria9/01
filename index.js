@@ -1,5 +1,5 @@
 import pkg from 'whatsapp-web.js';
-const { Client, LocalAuth } = pkg;
+const { Client, LocalAuth, MessageMedia } = pkg;
 import fetch from 'node-fetch';
 import express from 'express';
 import bodyParser from 'body-parser';
@@ -102,7 +102,6 @@ app.post('/reply', async (req, res) => {
   try {
     let payload;
 
-    // Parsing fleksibel dan aman terhadap berbagai format
     if (typeof req.body === 'string') {
       payload = JSON.parse(req.body);
     } else if (typeof req.body.data === 'string') {
@@ -111,18 +110,27 @@ app.post('/reply', async (req, res) => {
       payload = req.body.data || req.body;
     }
 
-    const { from, reply } = payload;
-    if (!from || !reply) {
+    const { from, reply, imageUrl, caption } = payload;
+
+    if (!from || (!reply && !imageUrl)) {
       return res.status(400).json({
-        error: 'Parameter from atau reply kosong',
+        error: 'Parameter "from" dan minimal salah satu dari "reply" atau "imageUrl" wajib diisi',
         contoh_format: {
           from: '628xxxx@c.us',
           reply: 'Pesan balasan',
+          imageUrl: 'https://domain.com/file.jpg',
+          caption: 'Ini caption opsional',
         },
       });
     }
 
-    await client.sendMessage(from, reply);
+    if (imageUrl) {
+      const media = await MessageMedia.fromUrl(imageUrl);
+      await client.sendMessage(from, media, { caption: caption || reply || '' });
+    } else {
+      await client.sendMessage(from, reply);
+    }
+
     res.json({ success: true });
   } catch (err) {
     console.error('Error di /reply:', err);
