@@ -19,12 +19,12 @@ cloudinary.config({
 
 // Service Account untuk Firebase JWT
 const serviceAccount = {
-  private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+  private_key: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
   client_email: 'firebase-adminsdk-fbsvc@wabot-d73ef.iam.gserviceaccount.com',
   project_id: 'wabot-d73ef',
 };
 
-// Fungsi untuk ambil access token
+// Fungsi untuk ambil access token dari Firebase
 async function getAccessToken() {
   const now = Math.floor(Date.now() / 1000);
   const payload = {
@@ -74,6 +74,7 @@ client.on('qr', async (qr) => {
     console.log('✅ QR Code diupload:', result.secure_url);
   } catch (err) {
     console.error('❌ Gagal membuat/mengupload QR:', err);
+    console.error('Detail QR:', qr);
   }
 });
 
@@ -143,9 +144,17 @@ app.post('/reply', async (req, res) => {
     let payload;
 
     if (typeof req.body === 'string') {
-      payload = JSON.parse(req.body);
+      try {
+        payload = JSON.parse(req.body);
+      } catch (e) {
+        return res.status(400).json({ error: 'Format JSON tidak valid.' });
+      }
     } else if (typeof req.body.data === 'string') {
-      payload = JSON.parse(req.body.data);
+      try {
+        payload = JSON.parse(req.body.data);
+      } catch (e) {
+        return res.status(400).json({ error: 'Format JSON dalam field "data" tidak valid.' });
+      }
     } else {
       payload = req.body.data || req.body;
     }
@@ -165,7 +174,7 @@ app.post('/reply', async (req, res) => {
     }
 
     if (imageUrl) {
-      const media = await MessageMedia.fromUrl(imageUrl);
+      const media = await MessageMedia.fromUrl(imageUrl, { unsafeMime: true });
       await client.sendMessage(from, media, { caption: caption || reply || '' });
     } else {
       await client.sendMessage(from, reply);
