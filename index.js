@@ -5,6 +5,7 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import qrcode from 'qrcode';
 import cloudinary from 'cloudinary';
+import { GoogleAuth } from 'google-auth-library'; // <--- Tambahan
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -141,6 +142,36 @@ app.post('/reply', async (req, res) => {
     });
   }
 });
+
+// ======= TAMBAHAN: Endpoint untuk token Google =======
+app.post('/token', async (req, res) => {
+  try {
+    const { sender, message } = req.body;
+    if (!sender || !message) {
+      return res.status(400).json({ error: 'Parameter "sender" dan "message" wajib diisi.' });
+    }
+
+    const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT.replace(/\\n/g, '\n'));
+
+    const auth = new GoogleAuth({
+      credentials: serviceAccount,
+      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+    });
+
+    const client = await auth.getClient();
+    const token = await client.getAccessToken();
+
+    res.json({
+      sender,
+      message,
+      access_token: token.token,
+    });
+  } catch (err) {
+    console.error('❌ Gagal membuat token:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+// =====================================================
 
 // Inisialisasi bot
 client.initialize()
