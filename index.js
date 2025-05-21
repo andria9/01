@@ -5,7 +5,7 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import qrcode from 'qrcode';
 import cloudinary from 'cloudinary';
-import { GoogleAuth } from 'google-auth-library'; // <--- Tambahan
+import jwt from 'jsonwebtoken';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -16,6 +16,40 @@ cloudinary.config({
   api_key: '373539693517747',
   api_secret: 'HcUwhQbFHK9j4PJ0fypeT-LIaj8',
 });
+
+// Service Account untuk Firebase JWT
+const serviceAccount = {
+  private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+  client_email: 'firebase-adminsdk-fbsvc@wabot-d73ef.iam.gserviceaccount.com',
+  project_id: 'wabot-d73ef',
+};
+
+// Fungsi untuk ambil access token
+async function getAccessToken() {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: serviceAccount.client_email,
+    sub: serviceAccount.client_email,
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+    scope: 'https://www.googleapis.com/auth/datastore',
+  };
+
+  const jwtToken = jwt.sign(payload, serviceAccount.private_key, { algorithm: 'RS256' });
+
+  const response = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+      assertion: jwtToken,
+    }),
+  });
+
+  const data = await response.json();
+  return data.access_token;
+}
 
 // Inisialisasi WhatsApp client
 console.log('Memulai inisialisasi WhatsApp client...');
@@ -48,7 +82,6 @@ client.on('ready', () => {
   console.log('✅ Bot WhatsApp siap digunakan!');
 });
 
-// Event error
 client.on('auth_failure', msg => {
   console.error('❌ Autentikasi gagal:', msg);
 });
@@ -67,10 +100,16 @@ client.on('message', async (message) => {
   console.log('📥 Pesan dari', userId, ':', userMessage);
 
   try {
+    const accessToken = await getAccessToken();
+
     const webhookResponse = await fetch('https://hook.eu2.make.com/wu413lv36m0amr7hkhjivfej5extz375', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: userMessage, from: userId }),
+      body: JSON.stringify({
+        message: userMessage,
+        from: userId,
+        access_token: accessToken,
+      }),
     });
 
     const contentType = webhookResponse.headers.get('content-type') || '';
@@ -92,7 +131,7 @@ client.on('message', async (message) => {
   }
 });
 
-// Endpoint test untuk Railway
+// Endpoint test Railway
 app.get('/', (req, res) => {
   res.send('WhatsApp bot aktif.');
 });
@@ -143,42 +182,12 @@ app.post('/reply', async (req, res) => {
   }
 });
 
-// ======= TAMBAHAN: Endpoint untuk token Google =======
-app.post('/token', async (req, res) => {
-  try {
-    const { sender, message } = req.body;
-    if (!sender || !message) {
-      return res.status(400).json({ error: 'Parameter "sender" dan "message" wajib diisi.' });
-    }
-
-    const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT.replace(/\\n/g, '\n'));
-
-    const auth = new GoogleAuth({
-      credentials: serviceAccount,
-      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-    });
-
-    const client = await auth.getClient();
-    const token = await client.getAccessToken();
-
-    res.json({
-      sender,
-      message,
-      access_token: token.token,
-    });
-  } catch (err) {
-    console.error('❌ Gagal membuat token:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-// =====================================================
-
 // Inisialisasi bot
 client.initialize()
   .then(() => console.log('✅ client.initialize() sukses'))
   .catch(err => console.error('❌ Gagal initialize WhatsApp client:', err));
 
-// Jalankan server Express
+// Jalankan server
 app.listen(PORT, () => {
   console.log(`🚀 Server Express aktif di port ${PORT}`);
 });
