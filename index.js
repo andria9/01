@@ -86,7 +86,7 @@ function setupQR(client, label) {
   });
 }
 
-setupQR(client1, 'client1');
+setupQR(client, 'client1');
 
 // === Status Logger ===
 
@@ -99,11 +99,11 @@ function setupClientStatus(client, label) {
   });
 }
 
-setupClientStatus(client1, 'client1');
+setupClientStatus(client, 'client1');
 
 // === Message Handler ===
 
-client1.on('message', async (msg) => {
+client.on('message', async (msg) => {
   console.log(`[client1] Pesan dari ${msg.from} ke ${msg.to}: "${msg.body}" pada ${new Date(msg.timestamp * 1000).toLocaleString()}`);
   if (msg.fromMe) return;
 
@@ -140,7 +140,7 @@ client1.on('message', async (msg) => {
   }
 });
 
-client1.initialize();
+client.initialize();
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
