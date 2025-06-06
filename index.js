@@ -1,4 +1,5 @@
 import puppeteer from 'puppeteer';
+import { Client, LocalAuth } from 'whatsapp-web.js';
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
 import fetch from 'node-fetch';
@@ -62,12 +63,12 @@ async function getAccessToken() {
 // === WhatsApp Client ===
 
 const client = new Client({
+  authStrategy: new LocalAuth(),
   puppeteer: {
-    executablePath: puppeteer.executablePath(), // ✅ INI WAJIB
+    executablePath: puppeteer.executablePath(), // ✅ Pakai path Chrome yang di-download puppeteer
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
-  },
-  authStrategy: new LocalAuth()
+  }
 });
 
 // === QR Handler ===
