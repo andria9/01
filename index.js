@@ -6,31 +6,38 @@ import bodyParser from 'body-parser';
 import qrcode from 'qrcode';
 import cloudinary from 'cloudinary';
 import jwt from 'jsonwebtoken';
+import dotenv from 'dotenv';
+
+dotenv.config(); // Load .env file
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Konfigurasi Cloudinary
+app.use(bodyParser.json());
+
+// ✅ Cloudinary config
 cloudinary.config({
-  cloud_name: 'dizjo8vzg',
-  api_key: '373539693517747',
-  api_secret: 'HcUwhQbFHK9j4PJ0fypeT-LIaj8',
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Service Account untuk Firebase JWT
+// ✅ Firebase Service Account
 const serviceAccount = {
-  private_key: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
-  client_email: 'firebase-adminsdk-fbsvc@wabot-d73ef.iam.gserviceaccount.com',
-  project_id: 'wabot-d73ef',
+  type: 'service_account',
+  project_id: process.env.FIREBASE_PROJECT_ID,
+  private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
+  private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+  client_email: process.env.FIREBASE_CLIENT_EMAIL,
+  token_uri: 'https://oauth2.googleapis.com/token',
 };
 
-// Fungsi untuk ambil access token dari Firebase
 async function getAccessToken() {
   const now = Math.floor(Date.now() / 1000);
   const payload = {
     iss: serviceAccount.client_email,
     sub: serviceAccount.client_email,
-    aud: 'https://oauth2.googleapis.com/token',
+    aud: serviceAccount.token_uri,
     iat: now,
     exp: now + 3600,
     scope: 'https://www.googleapis.com/auth/datastore',
@@ -38,7 +45,7 @@ async function getAccessToken() {
 
   const jwtToken = jwt.sign(payload, serviceAccount.private_key, { algorithm: 'RS256' });
 
-  const response = await fetch('https://oauth2.googleapis.com/token', {
+  const response = await fetch(serviceAccount.token_uri, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -51,152 +58,84 @@ async function getAccessToken() {
   return data.access_token;
 }
 
-// Inisialisasi WhatsApp client
-console.log('Memulai inisialisasi WhatsApp client...');
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: {
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  },
+// === WhatsApp Client ===
+
+const client1 = new Client({
+  authStrategy: new LocalAuth({ clientId: 'client1' }),
+  puppeteer: { headless: true, args: ['--no-sandbox'] },
 });
 
-// QR Code login
-client.on('qr', async (qr) => {
-  console.log('📸 QR Code diterima, silakan scan...');
-  try {
+// === QR Handler ===
+
+function setupQR(client, label) {
+  client.on('qr', async (qr) => {
+    console.log(`[${label}] Scan QR:`);
     const url = await qrcode.toDataURL(qr);
     const result = await cloudinary.v2.uploader.upload(url, {
       folder: 'whatsapp_qrcodes',
-      public_id: 'qrcode_image',
+      public_id: `qr_${label}`,
       resource_type: 'image',
     });
-    console.log('✅ QR Code diupload:', result.secure_url);
-  } catch (err) {
-    console.error('❌ Gagal membuat/mengupload QR:', err);
-    console.error('Detail QR:', qr);
-  }
-});
+    console.log(`[${label}] QR uploaded:`, result.secure_url);
+  });
+}
 
-// Event saat bot siap
-client.on('ready', () => {
-  console.log('✅ Bot WhatsApp siap digunakan!');
-});
+setupQR(client1, 'client1');
 
-client.on('auth_failure', msg => {
-  console.error('❌ Autentikasi gagal:', msg);
-});
+// === Status Logger ===
 
-client.on('disconnected', reason => {
-  console.error('❌ Bot terputus:', reason);
-});
+function setupClientStatus(client, label) {
+  client.on('ready', () => console.log(`✅ [${label}] Bot siap digunakan!`));
+  client.on('auth_failure', msg => console.error(`❌ [${label}] Gagal autentikasi:`, msg));
+  client.on('disconnected', reason => console.warn(`⚠️ [${label}] Terputus:`, reason));
+  client.on('loading_screen', (percent, message) => {
+    console.log(`🌀 [${label}] Loading ${percent}% - ${message}`);
+  });
+}
 
-// Pesan masuk
-client.on('message', async (message) => {
-  if (message.fromMe) return;
+setupClientStatus(client1, 'client1');
 
-  const userId = message.from;
-  const userMessage = message.body;
+// === Message Handler ===
 
-  console.log('📥 Pesan dari', userId, ':', userMessage);
+client1.on('message', async (msg) => {
+  console.log(`[client1] Pesan dari ${msg.from} ke ${msg.to}: "${msg.body}" pada ${new Date(msg.timestamp * 1000).toLocaleString()}`);
+  if (msg.fromMe) return;
 
   try {
     const accessToken = await getAccessToken();
 
-    const webhookResponse = await fetch('https://hook.eu2.make.com/obp63jje60cabivmhqopxjj2j7lnwm1p', {
+    const payload = {
+      from: msg.from,
+      text: msg.caption || msg.body || '',
+      access_token: accessToken,
+      timestamp: new Date().toISOString(),
+    };
+
+    if (msg.hasMedia) {
+      const media = await msg.downloadMedia();
+      const upload = await cloudinary.v2.uploader.upload(`data:${media.mimetype};base64,${media.data}`, {
+        folder: 'wa-inbox-images',
+        resource_type: 'image',
+      });
+
+      payload.imageUrl = upload.secure_url;
+      payload.mimetype = media.mimetype;
+    }
+
+    const res = await fetch(process.env.WEBHOOK_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message: userMessage,
-        from: userId,
-        access_token: accessToken,
-      }),
+      body: JSON.stringify(payload),
     });
 
-    const contentType = webhookResponse.headers.get('content-type') || '';
-    if (!contentType.includes('application/json')) {
-      const text = await webhookResponse.text();
-      console.warn('⚠️ Webhook tidak mengembalikan JSON. Respons:', text);
-      return;
-    }
-
-    const data = await webhookResponse.json();
-    if (data.reply) {
-      await message.reply(data.reply);
-      console.log('✅ Balasan berhasil dikirim.');
-    } else {
-      console.log('ℹ️ Tidak ada balasan dari webhook.');
-    }
-  } catch (error) {
-    console.error('❌ Gagal memproses pesan:', error);
-  }
-});
-
-// Endpoint test Railway
-app.get('/', (req, res) => {
-  res.send('WhatsApp bot aktif.');
-});
-
-// Endpoint kirim pesan manual
-app.use(bodyParser.json());
-app.post('/reply', async (req, res) => {
-  try {
-    let payload;
-
-    if (typeof req.body === 'string') {
-      try {
-        payload = JSON.parse(req.body);
-      } catch (e) {
-        return res.status(400).json({ error: 'Format JSON tidak valid.' });
-      }
-    } else if (typeof req.body.data === 'string') {
-      try {
-        payload = JSON.parse(req.body.data);
-      } catch (e) {
-        return res.status(400).json({ error: 'Format JSON dalam field "data" tidak valid.' });
-      }
-    } else {
-      payload = req.body.data || req.body;
-    }
-
-    const { from, reply, imageUrl, caption } = payload;
-
-    if (!from || (!reply && !imageUrl)) {
-      return res.status(400).json({
-        error: 'Parameter "from" dan minimal salah satu dari "reply" atau "imageUrl" wajib diisi',
-        contoh_format: {
-          from: '628xxxx@c.us',
-          reply: 'Pesan balasan',
-          imageUrl: 'https://domain.com/file.jpg',
-          caption: 'Ini caption opsional',
-        },
-      });
-    }
-
-    if (imageUrl) {
-      const media = await MessageMedia.fromUrl(imageUrl, { unsafeMime: true });
-      await client.sendMessage(from, media, { caption: caption || reply || '' });
-    } else {
-      await client.sendMessage(from, reply);
-    }
-
-    res.json({ success: true });
+    console.log(`[client1] Webhook status: ${res.status}`);
   } catch (err) {
-    console.error('Error di /reply:', err);
-    res.status(500).json({
-      error: 'Gagal memproses permintaan.',
-      detail: err.message,
-      raw: req.body,
-    });
+    console.error(`[client1] Gagal kirim ke webhook:`, err);
   }
 });
 
-// Inisialisasi bot
-client.initialize()
-  .then(() => console.log('✅ client.initialize() sukses'))
-  .catch(err => console.error('❌ Gagal initialize WhatsApp client:', err));
+client1.initialize();
 
-// Jalankan server
 app.listen(PORT, () => {
-  console.log(`🚀 Server Express aktif di port ${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
