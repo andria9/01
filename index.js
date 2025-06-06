@@ -1,5 +1,4 @@
 import puppeteer from 'puppeteer';
-import { Client, LocalAuth } from 'whatsapp-web.js';
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
 import fetch from 'node-fetch';
