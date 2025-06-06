@@ -1,6 +1,4 @@
 import puppeteer from 'puppeteer';
-
-process.env.CHROME_BIN = puppeteer.executablePath();
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
 import fetch from 'node-fetch';
@@ -65,7 +63,7 @@ async function getAccessToken() {
 
 const client = new Client({
   puppeteer: {
-    executablePath: process.env.CHROME_BIN,
+    executablePath: puppeteer.executablePath(),
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   }
