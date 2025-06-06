@@ -1,3 +1,4 @@
+process.env.CHROME_BIN = require('puppeteer').executablePath();
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
 import fetch from 'node-fetch';
@@ -60,9 +61,12 @@ async function getAccessToken() {
 
 // === WhatsApp Client ===
 
-const client1 = new Client({
-  authStrategy: new LocalAuth({ clientId: 'client1' }),
-  puppeteer: { headless: true, args: ['--no-sandbox'] },
+const client = new Client({
+  puppeteer: {
+    executablePath: process.env.CHROME_BIN,
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  }
 });
 
 // === QR Handler ===
