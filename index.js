@@ -1,4 +1,6 @@
-process.env.CHROME_BIN = require('puppeteer').executablePath();
+import puppeteer from 'puppeteer';
+
+process.env.CHROME_BIN = puppeteer.executablePath();
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
 import fetch from 'node-fetch';
