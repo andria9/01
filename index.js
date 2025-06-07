@@ -72,10 +72,9 @@ async function getAccessToken() {
 const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
-    executablePath: puppeteer.executablePath(), // ✅ Pakai path Chrome yang di-download puppeteer
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  }
+  executablePath: '/usr/bin/chromium-browser', // Path khusus Replit
+  args: ['--no-sandbox', '--disable-setuid-sandbox', '--single-process']
+}
 });
 
 // === QR Handler ===
