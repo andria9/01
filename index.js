@@ -56,8 +56,16 @@ async function getAccessToken() {
   });
 
   const data = await response.json();
+
+  // ✅ Validasi access token
+  if (!data.access_token) {
+    console.error('❌ Gagal ambil access token:', data);
+    throw new Error(`Gagal ambil access token: ${data.error_description || JSON.stringify(data)}`);
+  }
+
   return data.access_token;
 }
+
 
 // === WhatsApp Client ===
 
@@ -109,13 +117,6 @@ client.on('message', async (msg) => {
   try {
     const accessToken = await getAccessToken();
 
-    const payload = {
-      from: msg.from,
-      text: msg.caption || msg.body || '',
-      access_token: accessToken,
-      timestamp: new Date().toISOString(),
-    };
-
     if (msg.hasMedia) {
       const media = await msg.downloadMedia();
       const upload = await cloudinary.v2.uploader.upload(`data:${media.mimetype};base64,${media.data}`, {
@@ -123,24 +124,109 @@ client.on('message', async (msg) => {
         resource_type: 'image',
       });
 
-      payload.imageUrl = upload.secure_url;
-      payload.mimetype = media.mimetype;
-    }
-
     const res = await fetch(process.env.WEBHOOK_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+     method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: msg.from,
+          imageUrl: upload.secure_url,
+          mimetype: media.mimetype,
+          text: msg.caption || msg.body || '',
+          access_token: accessToken,
+          timestamp: new Date().toISOString(),
+        }),
+      });
 
-    console.log(`[client1] Webhook status: ${res.status}`);
+    console.log(`[client1] Webhook (media) status: ${res.status}`);
+  } else {
+      const res = await fetch(process.env.WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: msg.from,
+          text: msg.body,
+          access_token: accessToken,
+          timestamp: new Date().toISOString(),
+        }),
+      });
+
+      console.log(`[client1] Webhook (teks) status: ${res.status}`);
+    }
   } catch (err) {
     console.error(`[client1] Gagal kirim ke webhook:`, err);
   }
 });
 
-client.initialize();
+// === Endpoint Balasan ===
+
+app.post('/reply', async (req, res) => {
+  await handleReply(req, res, client, 'client1');
+});
+
+async function handleReply(req, res, client, label) {
+  try {
+console.log(`[${label}] Payload masuk ke /reply:`, JSON.stringify(req.body, null, 2));
+    const payload = typeof req.body === 'string'
+      ? JSON.parse(req.body)
+      : typeof req.body.data === 'string'
+        ? JSON.parse(req.body.data)
+        : req.body.data || req.body;
+
+    const { from, reply, imageUrl, caption } = payload;
+
+    if (!from || (!reply && !imageUrl)) {
+      return res.status(400).json({ error: 'from dan reply/imageUrl wajib' });
+    }
+
+    if (Array.isArray(imageUrl)) {
+      if (imageUrl.length === 1) {
+        // ✅ Jika hanya 1 gambar dalam array, kirim seperti biasa
+        const media = await MessageMedia.fromUrl(imageUrl[0], { unsafeMime: true });
+        await client.sendMessage(from, media, { caption: caption || reply || '' });
+      } else {
+        // ✅ Jika banyak gambar, kirim sebagai galeri
+        const mediaList = await Promise.all(
+  imageUrl.map(async (url) => await MessageMedia.fromUrl(url, { unsafeMime: true }))
+);
+
+console.log(`[${label}] Kirim ${mediaList.length} gambar ke ${from}`);
+
+for (let i = 0; i < mediaList.length; i++) {
+  const options = i === 0 ? { caption: caption || reply || '' } : {};
+  await client.sendMessage(from, mediaList[i], options);
+}
+      }
+    } else if (typeof imageUrl === 'string') {
+      const media = await MessageMedia.fromUrl(imageUrl, { unsafeMime: true });
+      await client.sendMessage(from, media, { caption: caption || reply || '' });
+    } else {
+      await client.sendMessage(from, reply);
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(`[${label}] Error balas:`, err.message);
+    res.status(500).json({ error: 'Gagal balas', detail: err.message });
+  }
+}
+
+// === Server Start ===
+
+app.get('/', (req, res) => {
+  res.send('WhatsApp bot aktif!');
+});
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
+  startBot(); // Panggil fungsi async ini
 });
+
+async function startBot() {
+  try {
+    console.log('🔄 Inisialisasi client1...');
+    await client.initialize();
+    console.log('✅ Inisialisasi client1 selesai');
+  } catch (err) {
+    console.error('❌ Gagal inisialisasi client1:', err.message);
+  }
+}
