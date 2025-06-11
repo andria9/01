@@ -1,8 +1,1 @@
-.env
-node_modules
-firebase-access-token-generator/
-firebase.js
-firebase-key.json
-generateAccessToken.js
-ngrok.exe
-serviceAccounkey.json
+
