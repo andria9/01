@@ -69,13 +69,29 @@ async function getAccessToken() {
 
 // === WhatsApp Client ===
 
-const client = new Client({
+/* const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
     executablePath: puppeteer.executablePath(), // ✅ Pakai path Chrome yang di-download puppeteer
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   }
+}); */
+
+const client = new Client({
+  authStrategy: new LocalAuth(),
+  puppeteer: {
+    headless: true,
+    executablePath: '/usr/bin/google-chrome-stable',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--disable-gpu',
+      '--window-size=1920,1080'
+    ],
+  },
 });
 
 // === QR Handler ===
