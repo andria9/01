@@ -7,6 +7,10 @@ import bodyParser from 'body-parser';
 import qrcode from 'qrcode';
 import cloudinary from 'cloudinary';
 import jwt from 'jsonwebtoken';
+import { writeFileSync, unlinkSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { v4 as uuidv4 } from 'uuid';
 import dotenv from 'dotenv';
 
 dotenv.config(); // Load .env file
@@ -69,30 +73,23 @@ async function getAccessToken() {
 
 // === WhatsApp Client ===
 
-/* const client = new Client({
-  authStrategy: new LocalAuth(),
+const client1 = new Client({
+  authStrategy: new LocalAuth({ clientId: 'BOT' }),
   puppeteer: {
     executablePath: puppeteer.executablePath(), // ✅ Pakai path Chrome yang di-download puppeteer
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   }
-}); */
-
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: {
-    headless: true,
-    executablePath: '/usr/bin/google-chrome-stable',
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--disable-gpu',
-      '--window-size=1920,1080'
-    ],
-  },
 });
+
+/*const client2 = new Client({
+  authStrategy: new LocalAuth({ clientId: 'Bendera' }),
+  puppeteer: {
+    executablePath: puppeteer.executablePath(), // ✅ Pakai path Chrome yang di-download puppeteer
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  }
+});*/
 
 // === QR Handler ===
 
@@ -109,7 +106,8 @@ function setupQR(client, label) {
   });
 }
 
-setupQR(client, 'client1');
+setupQR(client1, 'BOT');
+/*setupQR(client2, 'Bendera');*/
 
 // === Status Logger ===
 
@@ -122,39 +120,50 @@ function setupClientStatus(client, label) {
   });
 }
 
-setupClientStatus(client, 'client1');
+setupClientStatus(client1, 'BOT');
+/*setupClientStatus(client2, 'Bendera');*/
 
 // === Message Handler ===
 
-client.on('message', async (msg) => {
-  console.log(`[client1] Pesan dari ${msg.from} ke ${msg.to}: "${msg.body}" pada ${new Date(msg.timestamp * 1000).toLocaleString()}`);
+client1.on('message', async (msg) => {
+  console.log(`[BOT] Pesan dari ${msg.from} ke ${msg.to}: "${msg.body}" pada ${new Date(msg.timestamp * 1000).toLocaleString()}`);
   if (msg.fromMe) return;
 
   try {
     const accessToken = await getAccessToken();
 
-    if (msg.hasMedia) {
-      const media = await msg.downloadMedia();
-      const upload = await cloudinary.v2.uploader.upload(`data:${media.mimetype};base64,${media.data}`, {
-        folder: 'wa-inbox-images',
-        resource_type: 'image',
-      });
+   if (msg.hasMedia) {
+  const media = await msg.downloadMedia();
+  const isVoice = msg.type === 'ptt';
 
-    const res = await fetch(process.env.WEBHOOK_URL, {
-     method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          from: msg.from,
-          imageUrl: upload.secure_url,
-          mimetype: media.mimetype,
-          text: msg.caption || msg.body || '',
-          access_token: accessToken,
-          timestamp: new Date().toISOString(),
-        }),
-      });
+  const buffer = Buffer.from(media.data, 'base64');
+  const extension = media.mimetype.split('/')[1]?.split(';')[0] || 'bin';
+  const tempFilePath = join(tmpdir(), `${uuidv4()}.${extension}`);
+  writeFileSync(tempFilePath, buffer);
 
-    console.log(`[client1] Webhook (media) status: ${res.status}`);
-  } else {
+  const upload = await cloudinary.v2.uploader.upload(tempFilePath, {
+    folder: 'wa-inbox-files',
+    resource_type: 'auto',
+  });
+
+  unlinkSync(tempFilePath);
+
+  const res = await fetch(process.env.WEBHOOK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: msg.from,
+      imageUrl: upload.secure_url,
+      mimetype: media.mimetype,
+      text: msg.caption || msg.body || '',
+      access_token: accessToken,
+      timestamp: new Date().toISOString(),
+      isVoiceNote: isVoice,
+    }),
+  });
+
+  console.log(`[BOT] Webhook (media) status: ${res.status}`);
+} else {
       const res = await fetch(process.env.WEBHOOK_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -166,18 +175,80 @@ client.on('message', async (msg) => {
         }),
       });
 
-      console.log(`[client1] Webhook (teks) status: ${res.status}`);
+      console.log(`[BOT] Webhook (teks) status: ${res.status}`);
     }
   } catch (err) {
-    console.error(`[client1] Gagal kirim ke webhook:`, err);
+    console.error(`[BOT] Gagal kirim ke webhook:`, err);
   }
 });
+
+/*client2.on('message', async (msg) => {
+  console.log(`[Bendera] Pesan dari ${msg.from} ke ${msg.to}: "${msg.body}" pada ${new Date(msg.timestamp * 1000).toLocaleString()}`);
+  if (msg.fromMe) return;
+
+  try {
+    const accessToken = await getAccessToken();
+
+   if (msg.hasMedia) {
+  const media = await msg.downloadMedia();
+  const isVoice = msg.type === 'ptt';
+
+  const buffer = Buffer.from(media.data, 'base64');
+  const extension = media.mimetype.split('/')[1]?.split(';')[0] || 'bin';
+  const tempFilePath = join(tmpdir(), `${uuidv4()}.${extension}`);
+  writeFileSync(tempFilePath, buffer);
+
+  const upload = await cloudinary.v2.uploader.upload(tempFilePath, {
+    folder: 'wa-inbox-files',
+    resource_type: 'auto',
+  });
+
+  unlinkSync(tempFilePath);
+
+  const res = await fetch(process.env.WEBHOOK_URL2, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      from: msg.from,
+      imageUrl: upload.secure_url,
+      mimetype: media.mimetype,
+      text: msg.caption || msg.body || '',
+      access_token: accessToken,
+      timestamp: new Date().toISOString(),
+      isVoiceNote: isVoice,
+    }),
+  });
+
+  console.log(`[BENDERA] Webhook (media) status: ${res.status}`);
+} else {
+      const res = await fetch(process.env.WEBHOOK_URL2, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: msg.from,
+          text: msg.body,
+          access_token: accessToken,
+          timestamp: new Date().toISOString(),
+        }),
+      });
+
+      console.log(`[Bendera] Webhook (teks) status: ${res.status}`);
+    }
+  } catch (err) {
+    console.error(`[Bendera] Gagal kirim ke webhook:`, err);
+  }
+});*/
 
 // === Endpoint Balasan ===
 
 app.post('/reply', async (req, res) => {
-  await handleReply(req, res, client, 'client1');
+  await handleReply(req, res, client1, 'PMY');
 });
+
+/*app.post('/reply-bendera', async (req, res) => {
+  await handleReply(req, res, client2, 'Bendera');
+});*/
+
 
 async function handleReply(req, res, client, label) {
   try {
@@ -239,10 +310,55 @@ app.listen(PORT, () => {
 
 async function startBot() {
   try {
-    console.log('🔄 Inisialisasi client1...');
-    await client.initialize();
-    console.log('✅ Inisialisasi client1 selesai');
+    console.log('🔄 Inisialisasi BOT...');
+    await client1.initialize();
+    console.log('✅ Inisialisasi BOT selesai');
   } catch (err) {
-    console.error('❌ Gagal inisialisasi client1:', err.message);
+    console.error('❌ Gagal inisialisasi BOT:', err.message);
   }
-}
+/*try {
+    console.log('🔄 Inisialisasi Bendera...');
+    await client2.initialize();
+    console.log('✅ Inisialisasi Bendera selesai');
+  } catch (err) {
+    console.error('❌ Gagal inisialisasi Bendera:', err.message);
+  }
+}*/
+
+setInterval(async () => {
+  try {
+    const state = await client1.getState();
+    console.log(`[PING] Bot state: ${state}`);
+    if (state !== 'CONNECTED') {
+      console.log('[RESTART] State bukan CONNECTED, force exit...');
+      process.exit(); // PM2 akan restart otomatis
+    }
+  } catch (err) {
+    console.log('[RESTART] Gagal ambil state:', err.message);
+    process.exit();
+  }
+}, 60000); // cek tiap 60 detik
+
+/*setInterval(async () => {
+  try {
+    const state = await client2.getState();
+    console.log(`[PING] Bot state: ${state}`);
+    if (state !== 'CONNECTED') {
+      console.log('[RESTART] State bukan CONNECTED, force exit...');
+      process.exit(); // PM2 akan restart otomatis
+    }
+  } catch (err) {
+    console.log('[RESTART] Gagal ambil state:', err.message);
+    process.exit();
+  }
+}, 60000); // cek tiap 60 detik */
+
+client1.on('disconnected', (reason) => {
+  console.log('❌ WhatsApp terputus:', reason);
+  process.exit();
+});
+
+/*client2.on('disconnected', (reason) => {
+  console.log('❌ WhatsApp terputus:', reason);
+  process.exit();
+});*/
