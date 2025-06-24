@@ -72,9 +72,9 @@ async function getAccessToken() {
 const client = new Client({
   authStrategy: new LocalAuth({ clientId: 'PMY' }),
   puppeteer: {
-    executablePath: puppeteer.executablePath(),
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+    executablePath: '/usr/bin/google-chrome-stable' // 👈 override path secara eksplisit
   }
 });
 
