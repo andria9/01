@@ -20,8 +20,8 @@ const PORT = process.env.PORT || 3000;
 
 app.use(bodyParser.json());
 
-// ✅ Cloudinary config
-cloudinary.config({
+// ✅ Cloudinary config (gunakan v2)
+cloudinary.v2.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
@@ -60,8 +60,6 @@ async function getAccessToken() {
   });
 
   const data = await response.json();
-
-  // ✅ Validasi access token
   if (!data.access_token) {
     console.error('❌ Gagal ambil access token:', data);
     throw new Error(`Gagal ambil access token: ${data.error_description || JSON.stringify(data)}`);
@@ -70,189 +68,116 @@ async function getAccessToken() {
   return data.access_token;
 }
 
-
 // === WhatsApp Client ===
-
-const client1 = new Client({
-  authStrategy: new LocalAuth({ clientId: 'BOT' }),
+const client = new Client({
+  authStrategy: new LocalAuth({ clientId: 'PMY' }),
   puppeteer: {
-    executablePath: puppeteer.executablePath(), // ✅ Pakai path Chrome yang di-download puppeteer
+    executablePath: puppeteer.executablePath(),
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox']
   }
 });
-
-/*const client2 = new Client({
-  authStrategy: new LocalAuth({ clientId: 'Bendera' }),
-  puppeteer: {
-    executablePath: puppeteer.executablePath(), // ✅ Pakai path Chrome yang di-download puppeteer
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  }
-});*/
 
 // === QR Handler ===
-
-function setupQR(client, label) {
-  client.on('qr', async (qr) => {
-    console.log(`[${label}] Scan QR:`);
-    const url = await qrcode.toDataURL(qr);
-    const result = await cloudinary.v2.uploader.upload(url, {
-      folder: 'whatsapp_qrcodes',
-      public_id: `qr_${label}`,
-      resource_type: 'image',
-    });
-    console.log(`[${label}] QR uploaded:`, result.secure_url);
+client.on('qr', async (qr) => {
+  console.log(`[PMY] Scan QR berikut:`);
+  const url = await qrcode.toDataURL(qr);
+  const result = await cloudinary.v2.uploader.upload(url, {
+    folder: 'whatsapp_qrcodes',
+    public_id: `qr_PMY`,
+    resource_type: 'image',
   });
-}
-
-setupQR(client1, 'BOT');
-/*setupQR(client2, 'Bendera');*/
+  console.log(`[PMY] QR uploaded: ${result.secure_url}`);
+});
 
 // === Status Logger ===
-
-function setupClientStatus(client, label) {
-  client.on('ready', () => console.log(`✅ [${label}] Bot siap digunakan!`));
-  client.on('auth_failure', msg => console.error(`❌ [${label}] Gagal autentikasi:`, msg));
-  client.on('disconnected', reason => console.warn(`⚠️ [${label}] Terputus:`, reason));
-  client.on('loading_screen', (percent, message) => {
-    console.log(`🌀 [${label}] Loading ${percent}% - ${message}`);
-  });
-}
-
-setupClientStatus(client1, 'BOT');
-/*setupClientStatus(client2, 'Bendera');*/
+client.on('ready', () => console.log(`✅ [PMY] Bot siap digunakan!`));
+client.on('auth_failure', msg => console.error(`❌ [PMY] Gagal autentikasi:`, msg));
+client.on('disconnected', reason => {
+  console.warn(`⚠️ [PMY] Terputus:`, reason);
+  process.exit(); // agar PM2 restart otomatis
+});
+client.on('loading_screen', (percent, message) => {
+  console.log(`🌀 [PMY] Loading ${percent}% - ${message}`);
+});
 
 // === Message Handler ===
-
-client1.on('message', async (msg) => {
-  console.log(`[BOT] Pesan dari ${msg.from} ke ${msg.to}: "${msg.body}" pada ${new Date(msg.timestamp * 1000).toLocaleString()}`);
+client.on('message', async (msg) => {
+  console.log(`[PMY] Pesan dari ${msg.from} ke ${msg.to}: "${msg.body}" pada ${new Date(msg.timestamp * 1000).toLocaleString()}`);
   if (msg.fromMe) return;
 
   try {
     const accessToken = await getAccessToken();
 
-   if (msg.hasMedia) {
-  const media = await msg.downloadMedia();
-  const isVoice = msg.type === 'ptt';
-
-  const buffer = Buffer.from(media.data, 'base64');
-  const extension = media.mimetype.split('/')[1]?.split(';')[0] || 'bin';
-  const tempFilePath = join(tmpdir(), `${uuidv4()}.${extension}`);
-  writeFileSync(tempFilePath, buffer);
-
-  const upload = await cloudinary.v2.uploader.upload(tempFilePath, {
-    folder: 'wa-inbox-files',
-    resource_type: 'auto',
-  });
-
-  unlinkSync(tempFilePath);
-
-  const res = await fetch(process.env.WEBHOOK_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+    const basePayload = {
       from: msg.from,
-      imageUrl: upload.secure_url,
-      mimetype: media.mimetype,
       text: msg.caption || msg.body || '',
       access_token: accessToken,
       timestamp: new Date().toISOString(),
-      isVoiceNote: isVoice,
-    }),
-  });
+    };
 
-  console.log(`[BOT] Webhook (media) status: ${res.status}`);
-} else {
-      const res = await fetch(process.env.WEBHOOK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          from: msg.from,
-          text: msg.body,
-          access_token: accessToken,
-          timestamp: new Date().toISOString(),
-        }),
+    if (msg.hasMedia) {
+      const media = await msg.downloadMedia();
+      const isVoice = msg.type === 'ptt';
+
+      const buffer = Buffer.from(media.data, 'base64');
+      const extension = media.mimetype.split('/')[1]?.split(';')[0] || 'bin';
+      const tempFilePath = join(tmpdir(), `${uuidv4()}.${extension}`);
+      writeFileSync(tempFilePath, buffer);
+
+      const upload = await cloudinary.v2.uploader.upload(tempFilePath, {
+        folder: 'wa-inbox-files',
+        resource_type: 'auto',
       });
 
-      console.log(`[BOT] Webhook (teks) status: ${res.status}`);
+      unlinkSync(tempFilePath);
+
+      basePayload.imageUrl = upload.secure_url;
+      basePayload.mimetype = media.mimetype;
+      basePayload.isVoiceNote = isVoice;
     }
+
+    // === Coba kirim ke webhook test dulu
+    let testResponse;
+    try {
+      testResponse = await fetch(process.env.WEBHOOK_TEST, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(basePayload),
+      });
+
+      if (testResponse.ok) {
+        console.log(`[PMY] ✅ Pesan diteruskan ke webhook TEST (${testResponse.status})`);
+        return; // sukses, tidak lanjut ke webhook prod
+      } else {
+        console.warn(`[PMY] ⚠️ Gagal webhook TEST, status: ${testResponse.status}`);
+      }
+    } catch (err) {
+      console.warn(`[PMY] ❌ Error webhook TEST: ${err.message}`);
+    }
+
+    // === Jika gagal kirim ke webhook test, kirim ke production
+    try {
+      const prodResponse = await fetch(process.env.WEBHOOK_PROD, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(basePayload),
+      });
+
+      console.log(`[PMY] ⛔️ Bukan pesan test webhook, diteruskan ke webhook PROD (${prodResponse.status})`);
+    } catch (err) {
+      console.error(`[PMY] ❌ Gagal kirim ke webhook PROD:`, err.message);
+    }
+
   } catch (err) {
-    console.error(`[BOT] Gagal kirim ke webhook:`, err);
+    console.error(`[PMY] ❌ Gagal proses pesan masuk:`, err.message);
   }
 });
-
-/*client2.on('message', async (msg) => {
-  console.log(`[Bendera] Pesan dari ${msg.from} ke ${msg.to}: "${msg.body}" pada ${new Date(msg.timestamp * 1000).toLocaleString()}`);
-  if (msg.fromMe) return;
-
-  try {
-    const accessToken = await getAccessToken();
-
-   if (msg.hasMedia) {
-  const media = await msg.downloadMedia();
-  const isVoice = msg.type === 'ptt';
-
-  const buffer = Buffer.from(media.data, 'base64');
-  const extension = media.mimetype.split('/')[1]?.split(';')[0] || 'bin';
-  const tempFilePath = join(tmpdir(), `${uuidv4()}.${extension}`);
-  writeFileSync(tempFilePath, buffer);
-
-  const upload = await cloudinary.v2.uploader.upload(tempFilePath, {
-    folder: 'wa-inbox-files',
-    resource_type: 'auto',
-  });
-
-  unlinkSync(tempFilePath);
-
-  const res = await fetch(process.env.WEBHOOK_URL2, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: msg.from,
-      imageUrl: upload.secure_url,
-      mimetype: media.mimetype,
-      text: msg.caption || msg.body || '',
-      access_token: accessToken,
-      timestamp: new Date().toISOString(),
-      isVoiceNote: isVoice,
-    }),
-  });
-
-  console.log(`[BENDERA] Webhook (media) status: ${res.status}`);
-} else {
-      const res = await fetch(process.env.WEBHOOK_URL2, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          from: msg.from,
-          text: msg.body,
-          access_token: accessToken,
-          timestamp: new Date().toISOString(),
-        }),
-      });
-
-      console.log(`[Bendera] Webhook (teks) status: ${res.status}`);
-    }
-  } catch (err) {
-    console.error(`[Bendera] Gagal kirim ke webhook:`, err);
-  }
-});*/
 
 // === Endpoint Balasan ===
-
-app.post('/reply', async (req, res) => {
-  await handleReply(req, res, client1, 'PMY');
-});
-
-/*app.post('/reply-bendera', async (req, res) => {
-  await handleReply(req, res, client2, 'Bendera');
-});*/
-
-
-async function handleReply(req, res, client, label) {
+app.post('/reply-pmy', async (req, res) => {
   try {
-console.log(`[${label}] Payload masuk ke /reply:`, JSON.stringify(req.body, null, 2));
+    console.log(`[PMY] Payload masuk ke /reply:`, JSON.stringify(req.body, null, 2));
     const payload = typeof req.body === 'string'
       ? JSON.parse(req.body)
       : typeof req.body.data === 'string'
@@ -267,21 +192,18 @@ console.log(`[${label}] Payload masuk ke /reply:`, JSON.stringify(req.body, null
 
     if (Array.isArray(imageUrl)) {
       if (imageUrl.length === 1) {
-        // ✅ Jika hanya 1 gambar dalam array, kirim seperti biasa
         const media = await MessageMedia.fromUrl(imageUrl[0], { unsafeMime: true });
         await client.sendMessage(from, media, { caption: caption || reply || '' });
       } else {
-        // ✅ Jika banyak gambar, kirim sebagai galeri
         const mediaList = await Promise.all(
-  imageUrl.map(async (url) => await MessageMedia.fromUrl(url, { unsafeMime: true }))
-);
+          imageUrl.map(async (url) => await MessageMedia.fromUrl(url, { unsafeMime: true }))
+        );
 
-console.log(`[${label}] Kirim ${mediaList.length} gambar ke ${from}`);
-
-for (let i = 0; i < mediaList.length; i++) {
-  const options = i === 0 ? { caption: caption || reply || '' } : {};
-  await client.sendMessage(from, mediaList[i], options);
-}
+        console.log(`[PMY] Kirim ${mediaList.length} gambar ke ${from}`);
+        for (let i = 0; i < mediaList.length; i++) {
+          const options = i === 0 ? { caption: caption || reply || '' } : {};
+          await client.sendMessage(from, mediaList[i], options);
+        }
       }
     } else if (typeof imageUrl === 'string') {
       const media = await MessageMedia.fromUrl(imageUrl, { unsafeMime: true });
@@ -292,42 +214,34 @@ for (let i = 0; i < mediaList.length; i++) {
 
     res.json({ success: true });
   } catch (err) {
-    console.error(`[${label}] Error balas:`, err.message);
+    console.error(`[PMY] Error balas:`, err.message);
     res.status(500).json({ error: 'Gagal balas', detail: err.message });
   }
-}
+});
 
 // === Server Start ===
-
 app.get('/', (req, res) => {
-  res.send('WhatsApp bot aktif!');
+  res.send('✅ WhatsApp bot aktif!');
 });
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
-  startBot(); // Panggil fungsi async ini
+  startBot();
 });
 
 async function startBot() {
   try {
-    console.log('🔄 Inisialisasi BOT...');
-    await client1.initialize();
-    console.log('✅ Inisialisasi BOT selesai');
+    console.log('🔄 Inisialisasi PMY...');
+    await client.initialize();
+    console.log('✅ Inisialisasi PMY selesai');
   } catch (err) {
-    console.error('❌ Gagal inisialisasi BOT:', err.message);
+    console.error('❌ Gagal inisialisasi PMY:', err.message);
   }
-/*try {
-    console.log('🔄 Inisialisasi Bendera...');
-    await client2.initialize();
-    console.log('✅ Inisialisasi Bendera selesai');
-  } catch (err) {
-    console.error('❌ Gagal inisialisasi Bendera:', err.message);
-  }
-}*/
+}
 
 setInterval(async () => {
   try {
-    const state = await client1.getState();
+    const state = await client.getState();
     console.log(`[PING] Bot state: ${state}`);
     if (state !== 'CONNECTED') {
       console.log('[RESTART] State bukan CONNECTED, force exit...');
@@ -337,28 +251,4 @@ setInterval(async () => {
     console.log('[RESTART] Gagal ambil state:', err.message);
     process.exit();
   }
-}, 60000); // cek tiap 60 detik
-
-/*setInterval(async () => {
-  try {
-    const state = await client2.getState();
-    console.log(`[PING] Bot state: ${state}`);
-    if (state !== 'CONNECTED') {
-      console.log('[RESTART] State bukan CONNECTED, force exit...');
-      process.exit(); // PM2 akan restart otomatis
-    }
-  } catch (err) {
-    console.log('[RESTART] Gagal ambil state:', err.message);
-    process.exit();
-  }
-}, 60000); // cek tiap 60 detik */
-
-client1.on('disconnected', (reason) => {
-  console.log('❌ WhatsApp terputus:', reason);
-  process.exit();
-});
-
-/*client2.on('disconnected', (reason) => {
-  console.log('❌ WhatsApp terputus:', reason);
-  process.exit();
-});*/
+}, 300000); // cek tiap 5 menit
