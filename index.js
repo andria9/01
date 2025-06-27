@@ -1,3 +1,7 @@
+import dotenv from 'dotenv';
+dotenv.config({ path: './.env' });
+
+import fs, { writeFileSync, unlinkSync } from 'fs';
 import puppeteer from 'puppeteer';
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
@@ -7,27 +11,22 @@ import bodyParser from 'body-parser';
 import qrcode from 'qrcode';
 import cloudinary from 'cloudinary';
 import jwt from 'jsonwebtoken';
-import { writeFileSync, unlinkSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
-import dotenv from 'dotenv';
-
-dotenv.config(); // Load .env file
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
+const PORT = 3000; // ✅ Port tetap
 app.use(bodyParser.json());
 
-// ✅ Cloudinary config (gunakan v2)
+// === Config Cloudinary
 cloudinary.v2.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// ✅ Firebase Service Account
+// === Firebase Service Account
 const serviceAccount = {
   type: 'service_account',
   project_id: process.env.FIREBASE_PROJECT_ID,
@@ -60,58 +59,50 @@ async function getAccessToken() {
   });
 
   const data = await response.json();
-  if (!data.access_token) {
-    console.error('❌ Gagal ambil access token:', data);
-    throw new Error(`Gagal ambil access token: ${data.error_description || JSON.stringify(data)}`);
-  }
-
+  if (!data.access_token) throw new Error(data.error_description || 'Token kosong');
   return data.access_token;
 }
 
-// === WhatsApp Client ===
+// === WhatsApp Client Tanpa Username/ClientID
 const client = new Client({
-  authStrategy: new LocalAuth({ clientId: 'PMY' }),
+  authStrategy: new LocalAuth(), // ✅ tidak pakai clientId
   puppeteer: {
     executablePath: puppeteer.executablePath(),
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
-  }
+    headless: 'new',
+    args: ['--no-sandbox', '--disable-setuid-sandbox'],
+  },
 });
 
-// === QR Handler ===
+// === QR Handler
 client.on('qr', async (qr) => {
-  console.log(`[PMY] Scan QR berikut:`);
   const url = await qrcode.toDataURL(qr);
   const result = await cloudinary.v2.uploader.upload(url, {
     folder: 'whatsapp_qrcodes',
-    public_id: `qr_PMY`,
+    public_id: `qr_pribadi`,
     resource_type: 'image',
   });
-  console.log(`[PMY] QR uploaded: ${result.secure_url}`);
+  console.log(`✅ QR uploaded: ${result.secure_url}`);
 });
 
-// === Status Logger ===
-client.on('ready', () => console.log(`✅ [PMY] Bot siap digunakan!`));
-client.on('auth_failure', msg => console.error(`❌ [PMY] Gagal autentikasi:`, msg));
+// === WhatsApp Lifecycle
+client.on('ready', () => console.log(`✅ Bot siap digunakan!`));
+client.on('auth_failure', msg => console.log(`❌ Gagal autentikasi: ${msg}`));
 client.on('disconnected', reason => {
-  console.warn(`⚠️ [PMY] Terputus:`, reason);
-  process.exit(); // agar PM2 restart otomatis
+  console.log(`⚠️ Terputus: ${reason}`);
+  process.exit();
 });
 client.on('loading_screen', (percent, message) => {
-  console.log(`🌀 [PMY] Loading ${percent}% - ${message}`);
+  console.log(`🌀 Loading ${percent}% - ${message}`);
 });
 
-// === Message Handler ===
+// === Message Handler
 client.on('message', async (msg) => {
-  console.log(`[PMY] Pesan dari ${msg.from} ke ${msg.to}: "${msg.body}" pada ${new Date(msg.timestamp * 1000).toLocaleString()}`);
   if (msg.fromMe) return;
 
   try {
     const accessToken = await getAccessToken();
-
-    const basePayload = {
+    const payload = {
       from: msg.from,
-      text: msg.caption || msg.body || '',
       access_token: accessToken,
       timestamp: new Date().toISOString(),
     };
@@ -119,65 +110,64 @@ client.on('message', async (msg) => {
     if (msg.hasMedia) {
       const media = await msg.downloadMedia();
       const isVoice = msg.type === 'ptt';
-
       const buffer = Buffer.from(media.data, 'base64');
       const extension = media.mimetype.split('/')[1]?.split(';')[0] || 'bin';
       const tempFilePath = join(tmpdir(), `${uuidv4()}.${extension}`);
       writeFileSync(tempFilePath, buffer);
 
       const upload = await cloudinary.v2.uploader.upload(tempFilePath, {
-        folder: 'wa-inbox-files',
+        folder: isVoice ? 'wa-inbox-audio' : 'wa-inbox-images',
         resource_type: 'auto',
       });
 
       unlinkSync(tempFilePath);
-
-      basePayload.imageUrl = upload.secure_url;
-      basePayload.mimetype = media.mimetype;
-      basePayload.isVoiceNote = isVoice;
+      payload.imageUrl = upload.secure_url;
+      payload.mimetype = media.mimetype;
+      payload.text = msg.caption || msg.body || '';
+      payload.isVoiceNote = isVoice;
+    } else {
+      payload.text = msg.body;
     }
 
-    // === Coba kirim ke webhook test dulu
-    let testResponse;
+    // === Kirim ke Webhook Test dulu
+    let testOk = false;
     try {
-      testResponse = await fetch(process.env.WEBHOOK_TEST, {
+      const testRes = await fetch(process.env.WEBHOOK_TEST, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(basePayload),
+        body: JSON.stringify(payload),
       });
-
-      if (testResponse.ok) {
-        console.log(`[PMY] ✅ Pesan diteruskan ke webhook TEST (${testResponse.status})`);
-        return; // sukses, tidak lanjut ke webhook prod
+      if (testRes.ok) {
+        console.log(`[✅] Webhook TEST OK (${testRes.status})`);
+        testOk = true;
       } else {
-        console.warn(`[PMY] ⚠️ Gagal webhook TEST, status: ${testResponse.status}`);
+        console.warn(`[⚠️] Webhook TEST gagal: ${testRes.status}`);
       }
     } catch (err) {
-      console.warn(`[PMY] ❌ Error webhook TEST: ${err.message}`);
+      console.warn(`[❌] Error webhook TEST: ${err.message}`);
     }
 
-    // === Jika gagal kirim ke webhook test, kirim ke production
-    try {
-      const prodResponse = await fetch(process.env.WEBHOOK_PROD, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(basePayload),
-      });
-
-      console.log(`[PMY] ⛔️ Bukan pesan test webhook, diteruskan ke webhook PROD (${prodResponse.status})`);
-    } catch (err) {
-      console.error(`[PMY] ❌ Gagal kirim ke webhook PROD:`, err.message);
+    // === Webhook Production jika test gagal
+    if (!testOk) {
+      try {
+        const prodRes = await fetch(process.env.WEBHOOK_PROD, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        console.log(`[⛔️] Webhook PROD: ${prodRes.status}`);
+      } catch (err) {
+        console.error(`[❌] Error webhook PROD: ${err.message}`);
+      }
     }
-
   } catch (err) {
-    console.error(`[PMY] ❌ Gagal proses pesan masuk:`, err.message);
+    console.error(`❌ Gagal proses pesan: ${err.message}`);
   }
 });
 
-// === Endpoint Balasan ===
-app.post('/reply-pmy', async (req, res) => {
+// === Balas Pesan
+app.post('/reply', async (req, res) => {
   try {
-    console.log(`[PMY] Payload masuk ke /reply:`, JSON.stringify(req.body, null, 2));
     const payload = typeof req.body === 'string'
       ? JSON.parse(req.body)
       : typeof req.body.data === 'string'
@@ -185,25 +175,15 @@ app.post('/reply-pmy', async (req, res) => {
         : req.body.data || req.body;
 
     const { from, reply, imageUrl, caption } = payload;
-
     if (!from || (!reply && !imageUrl)) {
       return res.status(400).json({ error: 'from dan reply/imageUrl wajib' });
     }
 
     if (Array.isArray(imageUrl)) {
-      if (imageUrl.length === 1) {
-        const media = await MessageMedia.fromUrl(imageUrl[0], { unsafeMime: true });
-        await client.sendMessage(from, media, { caption: caption || reply || '' });
-      } else {
-        const mediaList = await Promise.all(
-          imageUrl.map(async (url) => await MessageMedia.fromUrl(url, { unsafeMime: true }))
-        );
-
-        console.log(`[PMY] Kirim ${mediaList.length} gambar ke ${from}`);
-        for (let i = 0; i < mediaList.length; i++) {
-          const options = i === 0 ? { caption: caption || reply || '' } : {};
-          await client.sendMessage(from, mediaList[i], options);
-        }
+      for (let i = 0; i < imageUrl.length; i++) {
+        const media = await MessageMedia.fromUrl(imageUrl[i], { unsafeMime: true });
+        const options = i === 0 ? { caption: caption || reply || '' } : {};
+        await client.sendMessage(from, media, options);
       }
     } else if (typeof imageUrl === 'string') {
       const media = await MessageMedia.fromUrl(imageUrl, { unsafeMime: true });
@@ -214,41 +194,43 @@ app.post('/reply-pmy', async (req, res) => {
 
     res.json({ success: true });
   } catch (err) {
-    console.error(`[PMY] Error balas:`, err.message);
+    console.error(`❌ Gagal balas: ${err.message}`);
     res.status(500).json({ error: 'Gagal balas', detail: err.message });
   }
 });
 
-// === Server Start ===
+// === Health Check
 app.get('/', (req, res) => {
-  res.send('✅ WhatsApp bot aktif!');
+  res.send(`✅ Bot WhatsApp pribadi aktif!`);
 });
 
+// === Jalankan Bot
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server listening at http://localhost:${PORT}`);
   startBot();
 });
 
 async function startBot() {
   try {
-    console.log('🔄 Inisialisasi PMY...');
+    console.log('🔄 Inisialisasi...');
     await client.initialize();
-    console.log('✅ Inisialisasi PMY selesai');
+    console.log('✅ Bot berhasil diinisialisasi');
   } catch (err) {
-    console.error('❌ Gagal inisialisasi PMY:', err.message);
+    console.error('❌ Gagal inisialisasi:', err.message);
   }
 }
 
+// === Auto Restart Jika Terputus
 setInterval(async () => {
   try {
     const state = await client.getState();
-    console.log(`[PING] Bot state: ${state}`);
+    console.log(`[PING] State: ${state}`);
     if (state !== 'CONNECTED') {
-      console.log('[RESTART] State bukan CONNECTED, force exit...');
-      process.exit(); // PM2 akan restart otomatis
+      console.log('[RESTART] Tidak CONNECTED, restart...');
+      process.exit();
     }
   } catch (err) {
     console.log('[RESTART] Gagal ambil state:', err.message);
     process.exit();
   }
-}, 300000); // cek tiap 5 menit
+}, 5 * 60 * 1000);
