@@ -17,7 +17,7 @@
     "google-auth-library": "^9.15.1",
     "n8n": "^1.97.1",
     "node-fetch": "^3.3.2",
-    "puppeteer": "^24.10.0",
+    "puppeteer-core": "^24.10.0",
     "qrcode": "^1.5.4",
     "qrcode-terminal": "^0.12.0",
     "whatsapp-web.js": "^1.27.0"
