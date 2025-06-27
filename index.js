@@ -1,4 +1,4 @@
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-core';
 import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth, MessageMedia } = pkg;
 import fetch from 'node-fetch';
@@ -72,9 +72,8 @@ async function getAccessToken() {
 const client = new Client({
   authStrategy: new LocalAuth({ clientId: 'PMY' }),
   puppeteer: {
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    executablePath: '/usr/bin/google-chrome-stable' // 👈 override path secara eksplisit
+    browserWSEndpoint: process.env.BROWSERLESS_WS,
+    args: ['--no-sandbox']
   }
 });
 
