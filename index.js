@@ -234,3 +234,17 @@ setInterval(async () => {
     process.exit();
   }
 }, 5 * 60 * 1000);
+
+setInterval(async () => {
+  try {
+    const state = await client.getState();
+    console.log(`[PING] Bot state: ${state}`);
+    if (state !== 'CONNECTED') {
+      console.log('[RESTART] State bukan CONNECTED, force exit...');
+      process.exit(); // PM2 akan restart otomatis
+    }
+  } catch (err) {
+    console.log('[RESTART] Gagal ambil state:', err.message);
+    process.exit();
+  }
+}, 300000); // cek tiap 5 menit
